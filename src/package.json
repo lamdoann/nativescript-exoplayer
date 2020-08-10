@@ -86,10 +86,15 @@
   "readmeFilename": "README.md",
   "scripts": {
     "tsc": "tsc",
-    "prepack": "tsc",
+    "build": "tsc",
     "setup": "cd ../demo && npm i"
   },
+  "dependencies": {
+    "@nativescript/theme": "~2.3.0",
+    "tns-core-modules": "~6.5.0"
+  },
   "devDependencies": {
-    "typescript": "file:../demo/node_modules/typescript"
+    "typescript": "^3.9.7",
+    "nativescript-dev-webpack": "~1.5.0"
   }
 }

@@ -6,7 +6,7 @@ import * as nsApp from "tns-core-modules/application";
 
 export * from "./videoplayer-common";
 
-declare const android: any, com: any;
+declare const android: any, com: any, java: any, javax: any;
 
 // States from Exo Player
 const STATE_IDLE: number = 1;
@@ -432,7 +432,8 @@ export class Video extends VideoBase {
 						vs = new com.google.android.exoplayer2.source.hls.HlsMediaSource(uri, dsf, null, null);
 						break;
 					default:
-						vs = new com.google.android.exoplayer2.source.ExtractorMediaSource(uri, dsf, ef, null, null, null);
+						dsf = new EncryptedDataSourceFactory(this.encryptionKey);
+						vs = new com.google.android.exoplayer2.source.ExtractorMediaSource(uri, dsf, ef, null, null);
 				}
 
 				/* if (this.loop) {
@@ -702,6 +703,75 @@ export class Video extends VideoBase {
 		}
 		this.fireCurrentTimeEvent();
 	}
+}
 
+@Interfaces([com.google.android.exoplayer2.upstream.DataSource.Factory]) 
+class EncryptedDataSourceFactory extends java.lang.Object {
+	encryptionKey: string;
+	constructor(encryptionKey: string) {
+		super();
+		this.encryptionKey = encryptionKey;
+        return global.__native(this);
+	}
 
+	createDataSource = () => {
+		return new EncryptedDataSource(this.encryptionKey);
+	}
+}
+
+@Interfaces([com.google.android.exoplayer2.upstream.DataSource]) 
+class EncryptedDataSource extends java.lang.Object {
+	uri: any = null;
+	inputStream: any = null;
+	encryptionKey: string;
+	constructor(encryptionKey: string) {
+		super();
+		this.encryptionKey = encryptionKey;
+        return global.__native(this);
+	}
+
+	getResponseHeaders = () => {
+		return new java.util.HashMap();
+	}
+
+	addTransferListener = (transferListener: any) => {}
+
+	open = (dataSpec: any) => {
+		this.uri = dataSpec.uri;
+
+		const url = new java.net.URL("file://" + this.uri.toString());
+		const file = new java.io.FileInputStream(url.getFile());
+
+		const sha = java.security.MessageDigest.getInstance('SHA-1');
+		const secretKey = new java.lang.String(this.encryptionKey).getBytes("UTF-8");
+		const keySpec = new javax.crypto.spec.SecretKeySpec(java.util.Arrays.copyOf(sha.digest(secretKey), 16), "AES");
+
+		const ivSha = java.security.MessageDigest.getInstance('SHA-1');
+		const ivKey = new java.lang.String(this.encryptionKey).getBytes("UTF-8");
+		const ivSpec = new javax.crypto.spec.IvParameterSpec(java.util.Arrays.copyOf(ivSha.digest(ivKey), 16));
+
+		const cipher = javax.crypto.Cipher.getInstance("AES/CTR/NoPadding");
+		cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec, ivSpec);
+
+		this.inputStream = new javax.crypto.CipherInputStream(file, cipher);
+
+		return dataSpec.length;
+	}
+
+	read = (buffer: any, offset: any, readLength: number) => {
+		if (readLength == 0) {
+			return 0;
+		}
+		else {
+			return this.inputStream.read(buffer, offset, readLength) || 0;
+		}
+	}
+
+	getUri = () => {
+		return this.uri;
+	}
+
+	close = () => {
+		this.inputStream.close();
+	}
 }

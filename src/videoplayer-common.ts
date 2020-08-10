@@ -102,6 +102,7 @@ export class Video extends View {
     public loop: boolean = false; /// whether the video loops the playback after extends
     public muted: boolean = false;
     public fill: VideoFill = VideoFill.default;
+    public encryptionKey: string;
 
     public static IMAGETYPEMONO = 1;
     public static IMAGETYPESTEREOTOPBOTTOM = 2;
@@ -193,3 +194,8 @@ export const fillProperty = new Property<Video, VideoFill>({
     name: "fill"
 });
 fillProperty.register(Video);
+
+export const encryptionKeyProperty = new Property<Video, string>({
+    name: "encryptionKey"
+});
+encryptionKeyProperty.register(Video);
