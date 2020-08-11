@@ -432,7 +432,9 @@ export class Video extends VideoBase {
 						vs = new com.google.android.exoplayer2.source.hls.HlsMediaSource(uri, dsf, null, null);
 						break;
 					default:
-						dsf = new EncryptedDataSourceFactory(this.encryptionKey);
+						if (this.encryptionKey) {
+							dsf = new EncryptedDataSourceFactory(this.encryptionKey);
+						}
 						vs = new com.google.android.exoplayer2.source.ExtractorMediaSource(uri, dsf, ef, null, null);
 				}
 
@@ -504,6 +506,7 @@ export class Video extends VideoBase {
 
 			this._setupMediaPlayerListeners();
 			this.mediaPlayer.prepare(vs);
+			console.log('prepare', vs);
 			if (this.autoplay === true) {
 				this.mediaPlayer.setPlayWhenReady(true);
 			}
@@ -724,6 +727,9 @@ class EncryptedDataSource extends java.lang.Object {
 	uri: any = null;
 	inputStream: any = null;
 	encryptionKey: string;
+	private opened: boolean = false;
+	private bytesRemaining: any = 0;
+
 	constructor(encryptionKey: string) {
 		super();
 		this.encryptionKey = encryptionKey;
@@ -737,41 +743,125 @@ class EncryptedDataSource extends java.lang.Object {
 	addTransferListener = (transferListener: any) => {}
 
 	open = (dataSpec: any) => {
+		console.log('DataSource open', Date.now());
+
 		this.uri = dataSpec.uri;
+		this.inputStream = this.getCipherInputStream();
+		// this.setBytesRemaining(dataSpec);
 
-		const url = new java.net.URL("file://" + this.uri.toString());
-		const file = new java.io.FileInputStream(url.getFile());
-
-		const sha = java.security.MessageDigest.getInstance('SHA-1');
-		const secretKey = new java.lang.String(this.encryptionKey).getBytes("UTF-8");
-		const keySpec = new javax.crypto.spec.SecretKeySpec(java.util.Arrays.copyOf(sha.digest(secretKey), 16), "AES");
-
-		const ivSha = java.security.MessageDigest.getInstance('SHA-1');
-		const ivKey = new java.lang.String(this.encryptionKey).getBytes("UTF-8");
-		const ivSpec = new javax.crypto.spec.IvParameterSpec(java.util.Arrays.copyOf(ivSha.digest(ivKey), 16));
-
-		const cipher = javax.crypto.Cipher.getInstance("AES/CTR/NoPadding");
-		cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec, ivSpec);
-
-		this.inputStream = new javax.crypto.CipherInputStream(file, cipher);
+		this.opened = true;
 
 		return dataSpec.length;
 	}
 
-	read = (buffer: any, offset: any, readLength: number) => {
-		if (readLength == 0) {
-			return 0;
-		}
-		else {
-			return this.inputStream.read(buffer, offset, readLength) || 0;
+	private getCipherInputStream = () => {
+		const url = new java.net.URL("file://" + this.uri.toString());
+		const file = new java.io.File(url.getFile());
+		const fileInputStream = new java.io.FileInputStream(file);
+		
+		const secretKey = new java.lang.String(this.encryptionKey).getBytes('UTF-8');
+		const keySpec = new javax.crypto.spec.SecretKeySpec(secretKey, "AES");
+
+		const ivKey = new java.lang.String(this.encryptionKey).getBytes('UTF-8');
+		const ivSpec = new javax.crypto.spec.IvParameterSpec(ivKey);
+
+		const cipher = javax.crypto.Cipher.getInstance("AES/CTR/NoPadding");
+		cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec, ivSpec);
+
+		const cipherInputStream = new StreamingCipherInputStream(fileInputStream, cipher, keySpec, ivSpec);
+
+		return cipherInputStream;
+	}
+
+	private setBytesRemaining = (dataSpec: any) => {
+		if (dataSpec.length !== com.google.android.exoplayer2.C.LENGTH_UNSET) {
+		  this.bytesRemaining = dataSpec.length;
+		} else {
+			this.bytesRemaining = this.inputStream.available();
+			if (this.bytesRemaining == java.lang.Integer.MAX_VALUE) {
+				this.bytesRemaining = com.google.android.exoplayer2.C.LENGTH_UNSET;
+			}
 		}
 	}
+
+	read = (buffer: any, offset: any, readLength) => {
+		// else if (this.bytesRemaining === 0) {
+		// 	return com.google.android.exoplayer2.C.RESULT_END_OF_INPUT;
+		// }
+
+		// let bytesToRead = this.getBytesToRead(readLength);
+		// let bytesRead = this.inputStream.read(buffer, offset, bytesToRead);
+		
+		// if (bytesRead === -1) {
+		// 	if (this.bytesRemaining !== com.google.android.exoplayer2.C.LENGTH_UNSET) {
+		// 		throw new java.io.EOFException.EOFException();
+		// 	}
+		// 	return com.google.android.exoplayer2.C.RESULT_END_OF_INPUT;
+		// }
+
+		// if (this.bytesRemaining !== com.google.android.exoplayer2.C.LENGTH_UNSET) {
+		// 	this.bytesRemaining -= bytesRead;
+		// }
+		
+		// return bytesRead;
+		if (readLength === 0) {
+            return 0;
+        } else {
+			const bytesRead = this.inputStream.read(buffer, offset, readLength);
+            return bytesRead || 0;
+        }
+	}
+
+	private getBytesToRead(bytesToRead) {
+		if (this.bytesRemaining === com.google.android.exoplayer2.C.LENGTH_UNSET) {
+		  return bytesToRead;
+		}
+		return Math.min(this.bytesRemaining, bytesToRead);
+	  }
 
 	getUri = () => {
 		return this.uri;
 	}
 
 	close = () => {
-		this.inputStream.close();
+		this.uri = null;
+		try {
+		if (this.inputStream !== null) {
+			this.inputStream.close();
+		}
+		} catch (e) {
+			throw e;
+		} finally {
+			this.inputStream = null;
+			if (this.opened) {
+				this.opened = false;
+			}
+		}
 	}
+}
+
+class StreamingCipherInputStream extends javax.crypto.CipherInputStream {
+	private static AES_BLOCK_SIZE = 16;
+
+    private upstream;
+    private cipher;
+    private secretKeySpec;
+	private ivParameterSpec;
+	
+    constructor(inputStream, cipher, secretKeySpec, ivParameterSpec) {
+		super(inputStream, cipher);
+		this.upstream = inputStream;
+		this.cipher = cipher;
+		this.secretKeySpec = secretKeySpec;
+		this.ivParameterSpec = ivParameterSpec;
+		return global.__native(this);
+	}
+
+	public read(b, off, len) {
+		return super.read(b, off, len);
+	}
+
+    public available() {
+        return this.upstream.available();
+    }
 }
