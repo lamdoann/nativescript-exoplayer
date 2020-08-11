@@ -653,19 +653,8 @@ var EncryptedDataSource = (function (_super) {
         };
         _this.close = function () {
             _this.uri = null;
-            try {
-                if (_this.inputStream !== null) {
-                    _this.inputStream.close();
-                }
-            }
-            catch (e) {
-                throw e;
-            }
-            finally {
-                _this.inputStream = null;
-                if (_this.opened) {
-                    _this.opened = false;
-                }
+            if (_this.inputStream !== null) {
+                _this.inputStream.close();
             }
         };
         _this.encryptionKey = encryptionKey;

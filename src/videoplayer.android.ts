@@ -825,17 +825,8 @@ class EncryptedDataSource extends java.lang.Object {
 
 	close = () => {
 		this.uri = null;
-		try {
 		if (this.inputStream !== null) {
 			this.inputStream.close();
-		}
-		} catch (e) {
-			throw e;
-		} finally {
-			this.inputStream = null;
-			if (this.opened) {
-				this.opened = false;
-			}
 		}
 	}
 }
