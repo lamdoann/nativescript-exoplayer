@@ -433,15 +433,14 @@ export class Video extends VideoBase {
 						break;
 					default:
 						if (this.encryptionKey) {
-							const defaultDSF = new com.google.android.exoplayer2.upstream.DefaultDataSourceFactory(this._context, "NativeScript", bm);
+							const cipherFactory = new CipherFactory(this.encryptionKey);
 							dsf = new EncryptedDataSourceFactory(
-								this.encryptionKey,
-								defaultDSF.createDataSource()
+								cipherFactory.cipher,
+								cipherFactory.secretKeySpec,
+								cipherFactory.ivParameterSpec
 							);
 						}
-						vs = new com.google.android.exoplayer2.source.ExtractorMediaSource.Factory(dsf)
-							.setExtractorsFactory(ef)
-							.createMediaSource(uri);
+						vs = new com.google.android.exoplayer2.source.ExtractorMediaSource(uri, dsf, ef, null, null)
 				}
 
 				/* if (this.loop) {
@@ -716,33 +715,37 @@ export class Video extends VideoBase {
 
 @Interfaces([com.google.android.exoplayer2.upstream.DataSource.Factory]) 
 class EncryptedDataSourceFactory extends java.lang.Object {
-	encryptionKey: string;
-	dataSource: any;
-	constructor(encryptionKey: string, dataSource: any) {
+	private cipher;
+	private secretKeySpec;
+	private ivParameterSpec;
+	constructor(cipher, secretKeySpec, ivParameterSpec) {
 		super();
-		this.encryptionKey = encryptionKey;
-		this.dataSource = dataSource;
+		this.cipher = cipher;
+		this.secretKeySpec = secretKeySpec;
+		this.ivParameterSpec = ivParameterSpec;
         return global.__native(this);
 	}
 
 	createDataSource = () => {
-		return new EncryptedDataSource(this.encryptionKey, this.dataSource);
+		return new EncryptedDataSource(this.cipher, this.secretKeySpec, this.ivParameterSpec);
 	}
 }
 
 @Interfaces([com.google.android.exoplayer2.upstream.DataSource]) 
 class EncryptedDataSource extends java.lang.Object {
-	uri: any = null;
-	encryptionKey: string;
-	upstream: any;
-	cipherInputStream: any = null;
-	closed: boolean = false;
-	inputStream: any;
+	private inputStream;
+	private uri;
+	private bytesRemaining;
+	private cipher;
+	private secretKeySpec;
+	private ivParameterSpec;
+	private opened;
 
-	constructor(encryptionKey: string, upstream: any) {
+	constructor(cipher, secretKeySpec, ivParameterSpec) {
 		super();
-		this.encryptionKey = encryptionKey;
-		this.upstream = upstream;
+		this.cipher = cipher;
+		this.secretKeySpec = secretKeySpec;
+		this.ivParameterSpec =  ivParameterSpec;
         return global.__native(this);
 	}
 
@@ -753,91 +756,168 @@ class EncryptedDataSource extends java.lang.Object {
 	addTransferListener = (transferListener: any) => {}
 
 	open = (dataSpec: any) => {
-		if (this.closed) {
-			return 0;
+		if (this.opened) {
+			return this.bytesRemaining;
 		}
-		
+
 		this.uri = dataSpec.uri;
 
-		const sourceStream = new java.net.URL("file://" + this.uri.toString());
-		const connection = sourceStream.openConnection();
-		connection.connect();
-		this.inputStream = new java.io.BufferedInputStream(connection.getInputStream());
+		this.setupInputStream();
+		this.skipToPosition(dataSpec);
+		this.computeBytesRemaining(dataSpec);
 
-		const cipher = this.getCipher();
-        this.cipherInputStream = new StreamingCipherInputStream(this.inputStream, cipher);
-
-		console.log('DataSource open', Date.now(), dataSpec);
-
-        return dataSpec.length;
+		this.opened = true;
+		
+		return this.bytesRemaining;
 	}
 
-	private getCipher = () => {
-		const secretKey = new java.lang.String(this.encryptionKey).getBytes('UTF-8');
-		const keySpec = new javax.crypto.spec.SecretKeySpec(secretKey, "AES");
+	private setupInputStream = () => {
+		const encryptedFile = new java.io.File(this.uri.getPath());
+		console.log('setupInputStream', encryptedFile.getName(), encryptedFile.getTotalSpace());
+		const fileInputStream = new java.io.FileInputStream(encryptedFile);
+		this.inputStream = new StreamingCipherInputStream(fileInputStream, this.cipher, this.secretKeySpec, this.ivParameterSpec);
+	}
 
-		const ivKey = new java.lang.String(this.encryptionKey).getBytes('UTF-8');
-		const ivSpec = new javax.crypto.spec.IvParameterSpec(ivKey);
+	private skipToPosition = (dataSpec) => {
+		this.inputStream.forceSkip(dataSpec.position);
+	}
 
-		const cipher = javax.crypto.Cipher.getInstance("AES/CTR/NoPadding");
-		cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec, ivSpec);
-
-		return cipher;
+	private computeBytesRemaining = (dataSpec) => {
+		if (dataSpec.length != com.google.android.exoplayer2.C.LENGTH_UNSET) {
+			this.bytesRemaining = dataSpec.length;
+		} else {
+			this.bytesRemaining = this.inputStream.available();
+			console.log('computeBytesRemaining', this.bytesRemaining, java.lang.Integer.MAX_VALUE)
+			if (this.bytesRemaining == java.lang.Integer.MAX_VALUE) {
+			  this.bytesRemaining = com.google.android.exoplayer2.C.LENGTH_UNSET;
+			}
+		  }
 	}
 
 	read = (buffer: any, offset: any, readLength: any) => {
-		console.log('reading', offset, readLength);
-		if (!this.closed) {
-			console.log('reading 00000000000000');
-			const bytesRead = this.cipherInputStream.read(buffer, offset, readLength);
-
-			if (bytesRead < 0) {
-				return com.google.android.exoplayer2.C.RESULT_END_OF_INPUT
-			}
-
-			return bytesRead;
+		// console.log('read', buffer, offset, readLength);
+		// fast-fail if there's 0 quantity requested or we think we've already processed everything
+		if (readLength == 0) {
+			return 0;
+		} else if (this.bytesRemaining == 0) {
+			return com.google.android.exoplayer2.C.RESULT_END_OF_INPUT;
 		}
-		// if (this.cipherInputStream) {
+		// constrain the read length and try to read from the cipher input stream
+		let bytesToRead = this.getBytesToRead(readLength);
+		let bytesRead = this.inputStream.read(buffer, offset, bytesToRead);
+		// if we get a -1 that means we failed to read - we're either going to EOF error or broadcast EOF
+		if (bytesRead == -1) {
+			if (this.bytesRemaining !== com.google.android.exoplayer2.C.LENGTH_UNSET) {
+				throw new Error("End of file");
+			}
 			
-		// }
+			return com.google.android.exoplayer2.C.RESULT_END_OF_INPUT;
+		}
 
-		return com.google.android.exoplayer2.C.RESULT_END_OF_INPUT;
+		// we can't decrement bytes remaining if it's just a flag representation (as opposed to a mutable numeric quantity)
+		if (this.bytesRemaining != com.google.android.exoplayer2.C.LENGTH_UNSET) {
+			this.bytesRemaining -= bytesRead;
+		}
+
+		return bytesRead;
 	}
+
+	private getBytesToRead = (bytesToRead) => {
+		if (this.bytesRemaining === com.google.android.exoplayer2.C.LENGTH_UNSET) {
+		  return bytesToRead;
+		}
+		return Number.parseInt(Math.min(this.bytesRemaining, bytesToRead) as any);
+	  }
 
 	getUri = () => {
 		return this.uri;
 	}
 
 	close = () => {
-		console.log('closeeeeeeeee');
-		if (this.cipherInputStream !== null) {
-			console.log('closeeeeeeeee +++++++++');
-			this.cipherInputStream.close();
+		console.log('closed')
+		this.uri = null;
+		if (this.inputStream != null) {
 			this.inputStream.close();
-			this.cipherInputStream = null;
-			this.closed = true;
-            // this.upstream.close();
-        }
+			this.inputStream = null;
+
+			this.opened = false;
+		}
 	}
 }
 
 class StreamingCipherInputStream extends javax.crypto.CipherInputStream {
-    private inputStream;
+    private static AES_BLOCK_SIZE = 16;
+
+    private upstream;
     private cipher;
+    private secretKeySpec;
+	private ivParameterSpec;
 	
-    constructor(inputStream, cipher) {
+	private bytesAvailable
+	
+    constructor(inputStream, cipher, secretKeySpec, ivParameterSpec) {
 		super(inputStream, cipher);
 		this.upstream = inputStream;
 		this.cipher = cipher;
+		this.secretKeySpec = secretKeySpec;
+		this.ivParameterSpec = ivParameterSpec;
+		this.bytesAvailable = inputStream.available();
 
 		return global.__native(this);
 	}
 
-	public read(b, off, len) {
+	public read = (b, off, len) =>  {
 		return super.read(b, off, len);
 	}
 
-    public available() {
-        return this.inputStream.available();
+	public forceSkip = (bytesToSkip) => {
+		let processedBytes = 0;
+		while (processedBytes < bytesToSkip) {
+			let bytesSkipped = this.skip(bytesToSkip - processedBytes);
+			if (bytesSkipped == 0) {
+				if ((this as any).read() == -1) {
+					throw new Error('Cannot read');
+				}
+				bytesSkipped = 1;
+			}
+			processedBytes += bytesSkipped;
+		}
+		return processedBytes;
+	  }
+
+    public available = () => {
+        return this.upstream.available();
     }
+}
+
+class CipherFactory {
+	public cipher;
+	public secretKeySpec;
+	public ivParameterSpec;
+	private encryptionKey; 
+	constructor(encryptionKey: string) {
+		this.encryptionKey = encryptionKey;
+		this.secretKeySpec = this.createSecretKeySpec();
+		this.ivParameterSpec = this.createIvParameterSpec();
+		this.cipher = this.createCipher(this.secretKeySpec, this.ivParameterSpec);
+	}
+
+	private createCipher = (keySpec, ivSpec) => {
+		const cipher = javax.crypto.Cipher.getInstance("AES/CTR/NoPadding");
+		cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec, ivSpec);
+
+		return cipher;
+	}
+
+	private createSecretKeySpec = () => {
+		const secretKey = new java.lang.String(this.encryptionKey).getBytes('UTF-8');
+		const keySpec = new javax.crypto.spec.SecretKeySpec(secretKey, "AES");
+		return keySpec;
+	}
+
+	private createIvParameterSpec = () => {
+		const ivKey = new java.lang.String(this.encryptionKey).getBytes('UTF-8');
+		const ivSpec = new javax.crypto.spec.IvParameterSpec(ivKey);
+		return ivSpec;
+	}
 }

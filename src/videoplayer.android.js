@@ -351,12 +351,10 @@ var Video = (function (_super) {
                         break;
                     default:
                         if (this.encryptionKey) {
-                            var defaultDSF = new com.google.android.exoplayer2.upstream.DefaultDataSourceFactory(this._context, "NativeScript", bm);
-                            dsf = new EncryptedDataSourceFactory(this.encryptionKey, defaultDSF.createDataSource());
+                            var cipherFactory = new CipherFactory(this.encryptionKey);
+                            dsf = new EncryptedDataSourceFactory(cipherFactory.cipher, cipherFactory.secretKeySpec, cipherFactory.ivParameterSpec);
                         }
-                        vs = new com.google.android.exoplayer2.source.ExtractorMediaSource.Factory(dsf)
-                            .setExtractorsFactory(ef)
-                            .createMediaSource(uri);
+                        vs = new com.google.android.exoplayer2.source.ExtractorMediaSource(uri, dsf, ef, null, null);
                 }
             }
             else if (typeof this._src.typeSource === "number") {
@@ -586,13 +584,14 @@ var Video = (function (_super) {
 exports.Video = Video;
 var EncryptedDataSourceFactory = (function (_super) {
     __extends(EncryptedDataSourceFactory, _super);
-    function EncryptedDataSourceFactory(encryptionKey, dataSource) {
+    function EncryptedDataSourceFactory(cipher, secretKeySpec, ivParameterSpec) {
         var _this = _super.call(this) || this;
         _this.createDataSource = function () {
-            return new EncryptedDataSource(_this.encryptionKey, _this.dataSource);
+            return new EncryptedDataSource(_this.cipher, _this.secretKeySpec, _this.ivParameterSpec);
         };
-        _this.encryptionKey = encryptionKey;
-        _this.dataSource = dataSource;
+        _this.cipher = cipher;
+        _this.secretKeySpec = secretKeySpec;
+        _this.ivParameterSpec = ivParameterSpec;
         return global.__native(_this);
     }
     EncryptedDataSourceFactory = __decorate([
@@ -602,64 +601,84 @@ var EncryptedDataSourceFactory = (function (_super) {
 }(java.lang.Object));
 var EncryptedDataSource = (function (_super) {
     __extends(EncryptedDataSource, _super);
-    function EncryptedDataSource(encryptionKey, upstream) {
+    function EncryptedDataSource(cipher, secretKeySpec, ivParameterSpec) {
         var _this = _super.call(this) || this;
-        _this.uri = null;
-        _this.cipherInputStream = null;
-        _this.closed = false;
         _this.getResponseHeaders = function () {
         };
         _this.addTransferListener = function (transferListener) { };
         _this.open = function (dataSpec) {
-            if (_this.closed) {
-                return 0;
+            if (_this.opened) {
+                return _this.bytesRemaining;
             }
             _this.uri = dataSpec.uri;
-            var sourceStream = new java.net.URL("file://" + _this.uri.toString());
-            var connection = sourceStream.openConnection();
-            connection.connect();
-            _this.inputStream = new java.io.BufferedInputStream(connection.getInputStream());
-            var cipher = _this.getCipher();
-            _this.cipherInputStream = new StreamingCipherInputStream(_this.inputStream, cipher);
-            console.log('DataSource open', Date.now(), dataSpec);
-            return dataSpec.length;
+            _this.setupInputStream();
+            _this.skipToPosition(dataSpec);
+            _this.computeBytesRemaining(dataSpec);
+            _this.opened = true;
+            return _this.bytesRemaining;
         };
-        _this.getCipher = function () {
-            var secretKey = new java.lang.String(_this.encryptionKey).getBytes('UTF-8');
-            var keySpec = new javax.crypto.spec.SecretKeySpec(secretKey, "AES");
-            var ivKey = new java.lang.String(_this.encryptionKey).getBytes('UTF-8');
-            var ivSpec = new javax.crypto.spec.IvParameterSpec(ivKey);
-            var cipher = javax.crypto.Cipher.getInstance("AES/CTR/NoPadding");
-            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec, ivSpec);
-            return cipher;
+        _this.setupInputStream = function () {
+            var encryptedFile = new java.io.File(_this.uri.getPath());
+            console.log('setupInputStream', encryptedFile.getName(), encryptedFile.getTotalSpace());
+            var fileInputStream = new java.io.FileInputStream(encryptedFile);
+            _this.inputStream = new StreamingCipherInputStream(fileInputStream, _this.cipher, _this.secretKeySpec, _this.ivParameterSpec);
+        };
+        _this.skipToPosition = function (dataSpec) {
+            _this.inputStream.forceSkip(dataSpec.position);
+        };
+        _this.computeBytesRemaining = function (dataSpec) {
+            if (dataSpec.length != com.google.android.exoplayer2.C.LENGTH_UNSET) {
+                _this.bytesRemaining = dataSpec.length;
+            }
+            else {
+                _this.bytesRemaining = _this.inputStream.available();
+                console.log('computeBytesRemaining', _this.bytesRemaining, java.lang.Integer.MAX_VALUE);
+                if (_this.bytesRemaining == java.lang.Integer.MAX_VALUE) {
+                    _this.bytesRemaining = com.google.android.exoplayer2.C.LENGTH_UNSET;
+                }
+            }
         };
         _this.read = function (buffer, offset, readLength) {
-            console.log('reading', offset, readLength);
-            if (!_this.closed) {
-                console.log('reading 00000000000000');
-                var bytesRead = _this.cipherInputStream.read(buffer, offset, readLength);
-                if (bytesRead < 0) {
-                    return com.google.android.exoplayer2.C.RESULT_END_OF_INPUT;
-                }
-                return bytesRead;
+            if (readLength == 0) {
+                return 0;
             }
-            return com.google.android.exoplayer2.C.RESULT_END_OF_INPUT;
+            else if (_this.bytesRemaining == 0) {
+                return com.google.android.exoplayer2.C.RESULT_END_OF_INPUT;
+            }
+            var bytesToRead = _this.getBytesToRead(readLength);
+            var bytesRead = _this.inputStream.read(buffer, offset, bytesToRead);
+            if (bytesRead == -1) {
+                if (_this.bytesRemaining !== com.google.android.exoplayer2.C.LENGTH_UNSET) {
+                    throw new Error("End of file");
+                }
+                return com.google.android.exoplayer2.C.RESULT_END_OF_INPUT;
+            }
+            if (_this.bytesRemaining != com.google.android.exoplayer2.C.LENGTH_UNSET) {
+                _this.bytesRemaining -= bytesRead;
+            }
+            return bytesRead;
+        };
+        _this.getBytesToRead = function (bytesToRead) {
+            if (_this.bytesRemaining === com.google.android.exoplayer2.C.LENGTH_UNSET) {
+                return bytesToRead;
+            }
+            return Number.parseInt(Math.min(_this.bytesRemaining, bytesToRead));
         };
         _this.getUri = function () {
             return _this.uri;
         };
         _this.close = function () {
-            console.log('closeeeeeeeee');
-            if (_this.cipherInputStream !== null) {
-                console.log('closeeeeeeeee +++++++++');
-                _this.cipherInputStream.close();
+            console.log('closed');
+            _this.uri = null;
+            if (_this.inputStream != null) {
                 _this.inputStream.close();
-                _this.cipherInputStream = null;
-                _this.closed = true;
+                _this.inputStream = null;
+                _this.opened = false;
             }
         };
-        _this.encryptionKey = encryptionKey;
-        _this.upstream = upstream;
+        _this.cipher = cipher;
+        _this.secretKeySpec = secretKeySpec;
+        _this.ivParameterSpec = ivParameterSpec;
         return global.__native(_this);
     }
     EncryptedDataSource = __decorate([
@@ -669,17 +688,60 @@ var EncryptedDataSource = (function (_super) {
 }(java.lang.Object));
 var StreamingCipherInputStream = (function (_super) {
     __extends(StreamingCipherInputStream, _super);
-    function StreamingCipherInputStream(inputStream, cipher) {
+    function StreamingCipherInputStream(inputStream, cipher, secretKeySpec, ivParameterSpec) {
         var _this = _super.call(this, inputStream, cipher) || this;
+        _this.read = function (b, off, len) {
+            return _super.prototype.read.call(_this, b, off, len);
+        };
+        _this.forceSkip = function (bytesToSkip) {
+            var processedBytes = 0;
+            while (processedBytes < bytesToSkip) {
+                var bytesSkipped = _this.skip(bytesToSkip - processedBytes);
+                if (bytesSkipped == 0) {
+                    if (_this.read() == -1) {
+                        throw new Error('Cannot read');
+                    }
+                    bytesSkipped = 1;
+                }
+                processedBytes += bytesSkipped;
+            }
+            return processedBytes;
+        };
+        _this.available = function () {
+            return _this.upstream.available();
+        };
         _this.upstream = inputStream;
         _this.cipher = cipher;
+        _this.secretKeySpec = secretKeySpec;
+        _this.ivParameterSpec = ivParameterSpec;
+        _this.bytesAvailable = inputStream.available();
         return global.__native(_this);
     }
-    StreamingCipherInputStream.prototype.read = function (b, off, len) {
-        return _super.prototype.read.call(this, b, off, len);
-    };
-    StreamingCipherInputStream.prototype.available = function () {
-        return this.inputStream.available();
-    };
+    StreamingCipherInputStream.AES_BLOCK_SIZE = 16;
     return StreamingCipherInputStream;
 }(javax.crypto.CipherInputStream));
+var CipherFactory = (function () {
+    function CipherFactory(encryptionKey) {
+        var _this = this;
+        this.createCipher = function (keySpec, ivSpec) {
+            var cipher = javax.crypto.Cipher.getInstance("AES/CTR/NoPadding");
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec, ivSpec);
+            return cipher;
+        };
+        this.createSecretKeySpec = function () {
+            var secretKey = new java.lang.String(_this.encryptionKey).getBytes('UTF-8');
+            var keySpec = new javax.crypto.spec.SecretKeySpec(secretKey, "AES");
+            return keySpec;
+        };
+        this.createIvParameterSpec = function () {
+            var ivKey = new java.lang.String(_this.encryptionKey).getBytes('UTF-8');
+            var ivSpec = new javax.crypto.spec.IvParameterSpec(ivKey);
+            return ivSpec;
+        };
+        this.encryptionKey = encryptionKey;
+        this.secretKeySpec = this.createSecretKeySpec();
+        this.ivParameterSpec = this.createIvParameterSpec();
+        this.cipher = this.createCipher(this.secretKeySpec, this.ivParameterSpec);
+    }
+    return CipherFactory;
+}());
