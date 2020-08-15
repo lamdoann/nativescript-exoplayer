@@ -511,7 +511,6 @@ export class Video extends VideoBase {
 
 			this._setupMediaPlayerListeners();
 			this.mediaPlayer.prepare(vs);
-			console.log('prepare', vs);
 			if (this.autoplay === true) {
 				this.mediaPlayer.setPlayWhenReady(true);
 			}
@@ -750,7 +749,6 @@ class EncryptedDataSource extends java.lang.Object {
 	}
 
 	getResponseHeaders = () => {
-		// return new java.util.HashMap();
 	}
 
 	addTransferListener = (transferListener: any) => {}
@@ -762,9 +760,13 @@ class EncryptedDataSource extends java.lang.Object {
 
 		this.uri = dataSpec.uri;
 
-		this.setupInputStream();
-		this.skipToPosition(dataSpec);
-		this.computeBytesRemaining(dataSpec);
+		try {
+			this.setupInputStream();
+			this.skipToPosition(dataSpec);
+			this.computeBytesRemaining(dataSpec);
+		} catch (err) {
+			throw new EncryptedFileDataSourceException(err);
+		}
 
 		this.opened = true;
 		
@@ -773,7 +775,6 @@ class EncryptedDataSource extends java.lang.Object {
 
 	private setupInputStream = () => {
 		const encryptedFile = new java.io.File(this.uri.getPath());
-		console.log('setupInputStream', encryptedFile.getName(), encryptedFile.getTotalSpace());
 		const fileInputStream = new java.io.FileInputStream(encryptedFile);
 		this.inputStream = new StreamingCipherInputStream(fileInputStream, this.cipher, this.secretKeySpec, this.ivParameterSpec);
 	}
@@ -783,42 +784,53 @@ class EncryptedDataSource extends java.lang.Object {
 	}
 
 	private computeBytesRemaining = (dataSpec) => {
+		// const file = new java.io.File(dataSpec.uri.getPath());
+        // if (dataSpec.length != com.google.android.exoplayer2.C.LENGTH_UNSET) {
+        //     this.bytesRemaining = dataSpec.length;
+        // } else {
+        //     this.bytesRemaining = file.length() > java.lang.Integer.MAX_VALUE ? file.length() : this.inputStream.available();
+        //     if (this.bytesRemaining == java.lang.Integer.MAX_VALUE) {
+        //         this.bytesRemaining = com.google.android.exoplayer2.C.LENGTH_UNSET;
+        //     }
+		// }
+
 		if (dataSpec.length != com.google.android.exoplayer2.C.LENGTH_UNSET) {
 			this.bytesRemaining = dataSpec.length;
 		} else {
 			this.bytesRemaining = this.inputStream.available();
-			console.log('computeBytesRemaining', this.bytesRemaining, java.lang.Integer.MAX_VALUE)
 			if (this.bytesRemaining == java.lang.Integer.MAX_VALUE) {
 			  this.bytesRemaining = com.google.android.exoplayer2.C.LENGTH_UNSET;
 			}
-		  }
+		}
 	}
 
 	read = (buffer: any, offset: any, readLength: any) => {
-		// console.log('read', buffer, offset, readLength);
-		// fast-fail if there's 0 quantity requested or we think we've already processed everything
 		if (readLength == 0) {
 			return 0;
 		} else if (this.bytesRemaining == 0) {
 			return com.google.android.exoplayer2.C.RESULT_END_OF_INPUT;
 		}
-		// constrain the read length and try to read from the cipher input stream
+
 		let bytesToRead = this.getBytesToRead(readLength);
-		let bytesRead = this.inputStream.read(buffer, offset, bytesToRead);
-		// if we get a -1 that means we failed to read - we're either going to EOF error or broadcast EOF
+		let bytesRead;
+		
+		try {
+			bytesRead = this.inputStream.read(buffer, offset, bytesToRead);
+		} catch (e) {
+			throw new EncryptedFileDataSourceException(e);
+		}
+
 		if (bytesRead == -1) {
-			if (this.bytesRemaining !== com.google.android.exoplayer2.C.LENGTH_UNSET) {
-				throw new Error("End of file");
+			if (this.bytesRemaining != com.google.android.exoplayer2.C.LENGTH_UNSET) {
+				throw new EncryptedFileDataSourceException(new java.io.EOFException());
 			}
-			
 			return com.google.android.exoplayer2.C.RESULT_END_OF_INPUT;
 		}
 
-		// we can't decrement bytes remaining if it's just a flag representation (as opposed to a mutable numeric quantity)
 		if (this.bytesRemaining != com.google.android.exoplayer2.C.LENGTH_UNSET) {
-			this.bytesRemaining -= bytesRead;
+			this.bytesRemaining += -bytesRead;
 		}
-
+	  
 		return bytesRead;
 	}
 
@@ -826,7 +838,9 @@ class EncryptedDataSource extends java.lang.Object {
 		if (this.bytesRemaining === com.google.android.exoplayer2.C.LENGTH_UNSET) {
 		  return bytesToRead;
 		}
-		return Number.parseInt(Math.min(this.bytesRemaining, bytesToRead) as any);
+		const minBytesToRead = java.lang.Math.min(this.bytesRemaining, bytesToRead)
+
+		return Number.parseInt(minBytesToRead);
 	  }
 
 	getUri = () => {
@@ -834,13 +848,18 @@ class EncryptedDataSource extends java.lang.Object {
 	}
 
 	close = () => {
-		console.log('closed')
 		this.uri = null;
-		if (this.inputStream != null) {
-			this.inputStream.close();
+		try {
+			if (this.inputStream != null) {
+				this.inputStream.close();
+			}
+		} catch (e) {
+			throw new EncryptedFileDataSourceException(e);
+		} finally {
 			this.inputStream = null;
-
-			this.opened = false;
+			if (this.opened) {
+				this.opened = false;
+			}
 		}
 	}
 }
@@ -853,15 +872,12 @@ class StreamingCipherInputStream extends javax.crypto.CipherInputStream {
     private secretKeySpec;
 	private ivParameterSpec;
 	
-	private bytesAvailable
-	
     constructor(inputStream, cipher, secretKeySpec, ivParameterSpec) {
 		super(inputStream, cipher);
 		this.upstream = inputStream;
 		this.cipher = cipher;
 		this.secretKeySpec = secretKeySpec;
 		this.ivParameterSpec = ivParameterSpec;
-		this.bytesAvailable = inputStream.available();
 
 		return global.__native(this);
 	}
@@ -871,19 +887,31 @@ class StreamingCipherInputStream extends javax.crypto.CipherInputStream {
 	}
 
 	public forceSkip = (bytesToSkip) => {
-		let processedBytes = 0;
-		while (processedBytes < bytesToSkip) {
-			let bytesSkipped = this.skip(bytesToSkip - processedBytes);
-			if (bytesSkipped == 0) {
-				if ((this as any).read() == -1) {
-					throw new Error('Cannot read');
-				}
-				bytesSkipped = 1;
-			}
-			processedBytes += bytesSkipped;
-		}
-		return processedBytes;
-	  }
+		let skipped = this.upstream.skip(bytesToSkip);
+        try {
+            let skip = Number.parseInt((bytesToSkip % StreamingCipherInputStream.AES_BLOCK_SIZE) as any);
+            let blockOffset = bytesToSkip - skip;
+            let numberOfBlocks = blockOffset / StreamingCipherInputStream.AES_BLOCK_SIZE;
+            // from here to the next inline comment, i don't understand
+            let ivForOffsetAsBigInteger = new java.math.BigInteger(1, this.ivParameterSpec.getIV()).add(java.math.BigInteger.valueOf(numberOfBlocks));
+            let ivForOffsetByteArray = ivForOffsetAsBigInteger.toByteArray();
+            let computedIvParameterSpecForOffset;
+            if (ivForOffsetByteArray.length < StreamingCipherInputStream.AES_BLOCK_SIZE) {
+                let resizedIvForOffsetByteArray = (Array as any).create("byte", StreamingCipherInputStream.AES_BLOCK_SIZE);
+                java.lang.System.arraycopy(ivForOffsetByteArray, 0, resizedIvForOffsetByteArray, StreamingCipherInputStream.AES_BLOCK_SIZE - ivForOffsetByteArray.length, ivForOffsetByteArray.length);
+                computedIvParameterSpecForOffset = new javax.crypto.spec.IvParameterSpec(resizedIvForOffsetByteArray);
+            } else {
+                computedIvParameterSpecForOffset = new javax.crypto.spec.IvParameterSpec(ivForOffsetByteArray, ivForOffsetByteArray.length - StreamingCipherInputStream.AES_BLOCK_SIZE, StreamingCipherInputStream.AES_BLOCK_SIZE);
+            }
+            this.cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, this.secretKeySpec, computedIvParameterSpecForOffset);
+            let skipBuffer = (Array as any).create("byte", skip);
+            this.cipher.update(skipBuffer, 0, skip, skipBuffer);
+            java.util.Arrays.fill(skipBuffer, (new java.lang.Byte("0")).byteValue());
+        } catch (e) {
+            return 0;
+        }
+        return skipped;
+	}
 
     public available = () => {
         return this.upstream.available();
@@ -921,3 +949,9 @@ class CipherFactory {
 		return ivSpec;
 	}
 }
+
+class EncryptedFileDataSourceException extends java.io.IOException {
+    constructor(cause) {
+      super(cause);
+    }
+  }

@@ -395,7 +395,6 @@ var Video = (function (_super) {
             }
             this._setupMediaPlayerListeners();
             this.mediaPlayer.prepare(vs);
-            console.log('prepare', vs);
             if (this.autoplay === true) {
                 this.mediaPlayer.setPlayWhenReady(true);
             }
@@ -611,15 +610,19 @@ var EncryptedDataSource = (function (_super) {
                 return _this.bytesRemaining;
             }
             _this.uri = dataSpec.uri;
-            _this.setupInputStream();
-            _this.skipToPosition(dataSpec);
-            _this.computeBytesRemaining(dataSpec);
+            try {
+                _this.setupInputStream();
+                _this.skipToPosition(dataSpec);
+                _this.computeBytesRemaining(dataSpec);
+            }
+            catch (err) {
+                throw new EncryptedFileDataSourceException(err);
+            }
             _this.opened = true;
             return _this.bytesRemaining;
         };
         _this.setupInputStream = function () {
             var encryptedFile = new java.io.File(_this.uri.getPath());
-            console.log('setupInputStream', encryptedFile.getName(), encryptedFile.getTotalSpace());
             var fileInputStream = new java.io.FileInputStream(encryptedFile);
             _this.inputStream = new StreamingCipherInputStream(fileInputStream, _this.cipher, _this.secretKeySpec, _this.ivParameterSpec);
         };
@@ -632,7 +635,6 @@ var EncryptedDataSource = (function (_super) {
             }
             else {
                 _this.bytesRemaining = _this.inputStream.available();
-                console.log('computeBytesRemaining', _this.bytesRemaining, java.lang.Integer.MAX_VALUE);
                 if (_this.bytesRemaining == java.lang.Integer.MAX_VALUE) {
                     _this.bytesRemaining = com.google.android.exoplayer2.C.LENGTH_UNSET;
                 }
@@ -646,15 +648,21 @@ var EncryptedDataSource = (function (_super) {
                 return com.google.android.exoplayer2.C.RESULT_END_OF_INPUT;
             }
             var bytesToRead = _this.getBytesToRead(readLength);
-            var bytesRead = _this.inputStream.read(buffer, offset, bytesToRead);
+            var bytesRead;
+            try {
+                bytesRead = _this.inputStream.read(buffer, offset, bytesToRead);
+            }
+            catch (e) {
+                throw new EncryptedFileDataSourceException(e);
+            }
             if (bytesRead == -1) {
-                if (_this.bytesRemaining !== com.google.android.exoplayer2.C.LENGTH_UNSET) {
-                    throw new Error("End of file");
+                if (_this.bytesRemaining != com.google.android.exoplayer2.C.LENGTH_UNSET) {
+                    throw new EncryptedFileDataSourceException(new java.io.EOFException());
                 }
                 return com.google.android.exoplayer2.C.RESULT_END_OF_INPUT;
             }
             if (_this.bytesRemaining != com.google.android.exoplayer2.C.LENGTH_UNSET) {
-                _this.bytesRemaining -= bytesRead;
+                _this.bytesRemaining += -bytesRead;
             }
             return bytesRead;
         };
@@ -662,18 +670,27 @@ var EncryptedDataSource = (function (_super) {
             if (_this.bytesRemaining === com.google.android.exoplayer2.C.LENGTH_UNSET) {
                 return bytesToRead;
             }
-            return Number.parseInt(Math.min(_this.bytesRemaining, bytesToRead));
+            var minBytesToRead = java.lang.Math.min(_this.bytesRemaining, bytesToRead);
+            return Number.parseInt(minBytesToRead);
         };
         _this.getUri = function () {
             return _this.uri;
         };
         _this.close = function () {
-            console.log('closed');
             _this.uri = null;
-            if (_this.inputStream != null) {
-                _this.inputStream.close();
+            try {
+                if (_this.inputStream != null) {
+                    _this.inputStream.close();
+                }
+            }
+            catch (e) {
+                throw new EncryptedFileDataSourceException(e);
+            }
+            finally {
                 _this.inputStream = null;
-                _this.opened = false;
+                if (_this.opened) {
+                    _this.opened = false;
+                }
             }
         };
         _this.cipher = cipher;
@@ -694,18 +711,31 @@ var StreamingCipherInputStream = (function (_super) {
             return _super.prototype.read.call(_this, b, off, len);
         };
         _this.forceSkip = function (bytesToSkip) {
-            var processedBytes = 0;
-            while (processedBytes < bytesToSkip) {
-                var bytesSkipped = _this.skip(bytesToSkip - processedBytes);
-                if (bytesSkipped == 0) {
-                    if (_this.read() == -1) {
-                        throw new Error('Cannot read');
-                    }
-                    bytesSkipped = 1;
+            var skipped = _this.upstream.skip(bytesToSkip);
+            try {
+                var skip = Number.parseInt((bytesToSkip % StreamingCipherInputStream.AES_BLOCK_SIZE));
+                var blockOffset = bytesToSkip - skip;
+                var numberOfBlocks = blockOffset / StreamingCipherInputStream.AES_BLOCK_SIZE;
+                var ivForOffsetAsBigInteger = new java.math.BigInteger(1, _this.ivParameterSpec.getIV()).add(java.math.BigInteger.valueOf(numberOfBlocks));
+                var ivForOffsetByteArray = ivForOffsetAsBigInteger.toByteArray();
+                var computedIvParameterSpecForOffset = void 0;
+                if (ivForOffsetByteArray.length < StreamingCipherInputStream.AES_BLOCK_SIZE) {
+                    var resizedIvForOffsetByteArray = Array.create("byte", StreamingCipherInputStream.AES_BLOCK_SIZE);
+                    java.lang.System.arraycopy(ivForOffsetByteArray, 0, resizedIvForOffsetByteArray, StreamingCipherInputStream.AES_BLOCK_SIZE - ivForOffsetByteArray.length, ivForOffsetByteArray.length);
+                    computedIvParameterSpecForOffset = new javax.crypto.spec.IvParameterSpec(resizedIvForOffsetByteArray);
                 }
-                processedBytes += bytesSkipped;
+                else {
+                    computedIvParameterSpecForOffset = new javax.crypto.spec.IvParameterSpec(ivForOffsetByteArray, ivForOffsetByteArray.length - StreamingCipherInputStream.AES_BLOCK_SIZE, StreamingCipherInputStream.AES_BLOCK_SIZE);
+                }
+                _this.cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, _this.secretKeySpec, computedIvParameterSpecForOffset);
+                var skipBuffer = Array.create("byte", skip);
+                _this.cipher.update(skipBuffer, 0, skip, skipBuffer);
+                java.util.Arrays.fill(skipBuffer, (new java.lang.Byte("0")).byteValue());
             }
-            return processedBytes;
+            catch (e) {
+                return 0;
+            }
+            return skipped;
         };
         _this.available = function () {
             return _this.upstream.available();
@@ -714,7 +744,6 @@ var StreamingCipherInputStream = (function (_super) {
         _this.cipher = cipher;
         _this.secretKeySpec = secretKeySpec;
         _this.ivParameterSpec = ivParameterSpec;
-        _this.bytesAvailable = inputStream.available();
         return global.__native(_this);
     }
     StreamingCipherInputStream.AES_BLOCK_SIZE = 16;
@@ -745,3 +774,10 @@ var CipherFactory = (function () {
     }
     return CipherFactory;
 }());
+var EncryptedFileDataSourceException = (function (_super) {
+    __extends(EncryptedFileDataSourceException, _super);
+    function EncryptedFileDataSourceException(cause) {
+        return _super.call(this, cause) || this;
+    }
+    return EncryptedFileDataSourceException;
+}(java.io.IOException));
