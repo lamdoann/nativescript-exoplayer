@@ -892,7 +892,6 @@ class StreamingCipherInputStream extends javax.crypto.CipherInputStream {
             let skip = Number.parseInt((bytesToSkip % StreamingCipherInputStream.AES_BLOCK_SIZE) as any);
             let blockOffset = bytesToSkip - skip;
             let numberOfBlocks = blockOffset / StreamingCipherInputStream.AES_BLOCK_SIZE;
-            // from here to the next inline comment, i don't understand
             let ivForOffsetAsBigInteger = new java.math.BigInteger(1, this.ivParameterSpec.getIV()).add(java.math.BigInteger.valueOf(numberOfBlocks));
             let ivForOffsetByteArray = ivForOffsetAsBigInteger.toByteArray();
             let computedIvParameterSpecForOffset;
