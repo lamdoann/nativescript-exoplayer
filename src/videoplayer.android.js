@@ -520,6 +520,7 @@ var Video = (function (_super) {
         this._textureView = null;
         this.mediaPlayer = null;
         this.mediaController = null;
+        this._gaudioProcessor.destroyCore();
     };
     Video.prototype.release = function () {
         this.stopCurrentTimer();

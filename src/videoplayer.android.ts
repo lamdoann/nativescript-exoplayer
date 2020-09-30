@@ -45,8 +45,8 @@ export class Video extends VideoBase {
 	private _boundStop = this.suspendEvent.bind(this);
 	private enableSubtitles: boolean = false;
 
-	private _mInfo: any; // PlaybackInformation
-	private _gaudioProcessor: any;
+	private _mInfo: PlaybackInformation; // PlaybackInformation
+	private _gaudioProcessor: GaudioProcessor;
 
 	public TYPE = { DETECT: 0, SS: 1, DASH: 2, HLS: 3, OTHER: 4 };
 	public nativeView: any;
@@ -658,6 +658,7 @@ export class Video extends VideoBase {
 		this._textureView = null;
 		this.mediaPlayer = null;
 		this.mediaController = null;
+		this._gaudioProcessor.destroyCore();
 	}
 
 	private release(): void {
