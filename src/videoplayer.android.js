@@ -4,6 +4,7 @@ exports.Video = void 0;
 var videoplayer_common_1 = require("./videoplayer-common");
 var nsUtils = require("tns-core-modules/utils/utils");
 var nsApp = require("tns-core-modules/application");
+var gaudio_processor_android_1 = require("./gaudio-processor/gaudio-processor.android");
 __exportStar(require("./videoplayer-common"), exports);
 var STATE_IDLE = 1;
 var STATE_BUFFERING = 2;
@@ -37,6 +38,8 @@ var Video = (function (_super) {
         _this.eventPlaybackStart = false;
         _this.lastTimerUpdate = -1;
         _this.interval = null;
+        _this._mInfo = new gaudio_processor_android_1.PlaybackInformation();
+        _this._gaudioProcessor = new gaudio_processor_android_1.GaudioProcessor(_this._mInfo);
         return _this;
     }
     Object.defineProperty(Video.prototype, "playState", {
@@ -321,8 +324,7 @@ var Video = (function (_super) {
             var trackSelection = new com.google.android.exoplayer2.trackselection.AdaptiveTrackSelection.Factory(bm);
             var trackSelector = new com.google.android.exoplayer2.trackselection.DefaultTrackSelector(trackSelection);
             var loadControl = new com.google.android.exoplayer2.DefaultLoadControl();
-            this.mediaPlayer =
-                com.google.android.exoplayer2.ExoPlayerFactory.newSimpleInstance(this._context, trackSelector, loadControl);
+            this.mediaPlayer = com.google.android.exoplayer2.ExoPlayerFactory.newSimpleInstance(new gaudio_processor_android_1.ProcessorFactory(this._context, this._gaudioProcessor), trackSelector);
             if (this.textureSurface && !this.textureSurfaceSet) {
                 this.textureSurfaceSet = true;
                 this.mediaPlayer.setVideoSurface(this.textureSurface);

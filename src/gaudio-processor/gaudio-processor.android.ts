@@ -1,6 +1,3 @@
-// import * as nsUtils from "tns-core-modules/utils/utils";
-// import * as nsApp from "tns-core-modules/application";
-
 declare const android: any, com: any, java: any, javax: any;
 
 @Interfaces([com.google.android.exoplayer2.audio.AudioProcessor, com.gaudiolab.sol.android.SolMusicOneStatisticsEvent]) 
@@ -306,7 +303,7 @@ export class GaudioProcessor extends java.lang.Object {
   }
 }
 
-export class GaudioProcessorFactory extends com.google.android.exoplayer2.DefaultRenderersFactory  {
+export class ProcessorFactory extends com.google.android.exoplayer2.DefaultRenderersFactory  {
   public context: any;
   public solEqualizer: any;
   /**
@@ -328,5 +325,57 @@ export class GaudioProcessorFactory extends com.google.android.exoplayer2.Defaul
    */
   public buildAudioProcessors = () => {
     return [this.solEqualizer];
+  }
+}
+
+@Interfaces([java.io.Serializable]) 
+export class PlaybackInformation extends java.lang.Object {
+  static KEY_PLAYBACK_INFORMATION: string = "PlaybackInformation";
+  static EQ_BAND_COUNT: number = 10;
+
+  params: any; // ControlParams
+
+  presetType: number;
+  deviceType: number;
+
+  videoFilePath: any; // ArrayList<String>
+  solFilePath: any; // ArrayList<String>
+  hasReadPermission: boolean;
+
+  equalizerBandGainDbFloatArray: any; // float[]
+  constructor() {
+    super();
+
+    this.params = new com.gaudiolab.sol.android.ControlParams();
+    this.params.isEnable = true;
+    this.params.preferenceFeatures = 0;
+    this.params.loudnessType = com.gaudiolab.sol.android.SolMusicOne.LoudnessType.Basic.ordinal();
+
+    this.params.targetLoudness = -16;
+    this.params.loudnessType = 0;
+    this.params.environmentOffset = 0;
+
+    this.params.equalizerBandCount = PlaybackInformation.EQ_BAND_COUNT;
+    this.params.equalizerBandGainDb = Array(PlaybackInformation.EQ_BAND_COUNT); // new float[PlaybackInformation.EQ_BAND_COUNT]
+    this.params.equalizerGlobalGainDb = 0;
+
+    this.params.volumeGains = 0;
+    this.params.eleqVolume = 0;
+
+    this.params.upmixType = 0;
+    this.params.upmixGenre = 0;
+    this.params.reverbIntensity = 0;
+
+    this.params.metadataLength = 0;
+    this.params.metadata = null;
+
+    this.presetType = 0;
+    this.deviceType = 0;
+
+    return global.__native(this);
+  }
+
+  public getEqualizerBandGainDbFloatArray = () => {
+    return this.params.equalizerBandGainDb;
   }
 }

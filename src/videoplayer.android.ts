@@ -3,8 +3,12 @@
 import { Video as VideoBase, VideoFill, videoSourceProperty, subtitleSourceProperty } from "./videoplayer-common";
 import * as nsUtils from "tns-core-modules/utils/utils";
 import * as nsApp from "tns-core-modules/application";
+import { GaudioProcessor, ProcessorFactory, PlaybackInformation } from './gaudio-processor/gaudio-processor.android';
+
 
 export * from "./videoplayer-common";
+
+
 
 declare const android: any, com: any, java: any, javax: any;
 
@@ -41,6 +45,9 @@ export class Video extends VideoBase {
 	private _boundStop = this.suspendEvent.bind(this);
 	private enableSubtitles: boolean = false;
 
+	private _mInfo: any; // PlaybackInformation
+	private _gaudioProcessor: any;
+
 	public TYPE = { DETECT: 0, SS: 1, DASH: 2, HLS: 3, OTHER: 4 };
 	public nativeView: any;
 
@@ -68,6 +75,9 @@ export class Video extends VideoBase {
 		this.eventPlaybackStart = false;
 		this.lastTimerUpdate = -1;
 		this.interval = null;
+
+		this._mInfo = new PlaybackInformation();
+		this._gaudioProcessor = new GaudioProcessor(this._mInfo);
 	}
 
 	get playState(): any {
@@ -88,7 +98,6 @@ export class Video extends VideoBase {
 	[subtitleSourceProperty.setNative](value) {
 		this._updateSubtitles(value ? value.android : null);
 	}
-
 	private _setupTextureSurface(): void {
 		if (!this.textureSurface) {
 			if (!this._textureView.isAvailable()) {
@@ -395,8 +404,13 @@ export class Video extends VideoBase {
 			let trackSelection = new com.google.android.exoplayer2.trackselection.AdaptiveTrackSelection.Factory(bm);
 			let trackSelector = new com.google.android.exoplayer2.trackselection.DefaultTrackSelector(trackSelection);
 			let loadControl = new com.google.android.exoplayer2.DefaultLoadControl();
-			this.mediaPlayer =
-				com.google.android.exoplayer2.ExoPlayerFactory.newSimpleInstance(this._context, trackSelector, loadControl);
+
+			this.mediaPlayer = com.google.android.exoplayer2.ExoPlayerFactory.newSimpleInstance(
+				new ProcessorFactory(this._context, this._gaudioProcessor),
+				// this._context, 
+				trackSelector, 
+				// loadControl
+			);
 
 			if (this.textureSurface && !this.textureSurfaceSet) {
 				this.textureSurfaceSet = true;

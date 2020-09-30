@@ -23,6 +23,8 @@ export declare class Video extends VideoBase {
     private _boundStart;
     private _boundStop;
     private enableSubtitles;
+    private _mInfo;
+    private _gaudioProcessor;
     TYPE: {
         DETECT: number;
         SS: number;
