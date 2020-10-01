@@ -39,7 +39,8 @@
         "subtitle-source/subtitle-source.android.ts",
         "video-source/video-source-common.ts",
         "video-source/video-source.ios.ts",
-        "video-source/video-source.android.ts"
+        "video-source/video-source.android.ts",
+        "gaudio-processor/gaudio-processor.android.ts"
     ],
     "exclude": [
         "node_modules",

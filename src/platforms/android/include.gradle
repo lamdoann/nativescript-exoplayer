@@ -1,11 +1,12 @@
-configurations.maybeCreate("default")
-artifacts.add("default", file('src/main/java/GaudioSolMusicOne.aar'))
+// configurations.maybeCreate("default")
+// artifacts.add("default", file('src/main/java/GaudioSolMusicOne-release.aar'))
 //default elements
 android {
     
 }
 
 dependencies {
+    // implementation fileTree(include: ['*.jar', '*.aar'], dir: 'src/main/java')
     implementation 'com.google.android.exoplayer:exoplayer:2.9.6'
-    implementation files('src/main/java/GaudioSolMusicOne.aar')
+    // implementation files('src/main/java/GaudioSolMusicOne-release.aar')
 }
