@@ -1,3 +1,5 @@
+configurations.maybeCreate("default")
+artifacts.add("default", file('src/main/java/GaudioSolMusicOne.aar'))
 //default elements
 android {
     
@@ -5,4 +7,5 @@ android {
 
 dependencies {
     implementation 'com.google.android.exoplayer:exoplayer:2.9.6'
+    implementation files('src/main/java/GaudioSolMusicOne.aar')
 }

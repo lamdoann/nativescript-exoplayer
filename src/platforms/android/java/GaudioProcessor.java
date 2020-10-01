@@ -129,11 +129,11 @@ public class GaudioProcessor implements AudioProcessor, SolMusicOneStatisticsEve
   private void setupCore() {
     if (!mInitCore.get()) {
       mInitCore.compareAndSet(false, true);
-      if (mTrackIndex >= mInfo.getSolFilePath().size()) {
+      if (mTrackIndex >= mInfo.solFilePath.size()) {
         mTrackIndex = 0;
       }
 
-      byte[] metadata = getByteArrayFromFilePath(mInfo.getSolFilePath().get(mTrackIndex));
+      byte[] metadata = getByteArrayFromFilePath(mInfo.solFilePath.get(mTrackIndex));
       ControlParams controlParams = new ControlParams();
       controlParams.metadata = null;
       controlParams.metadataLength = 0;
@@ -143,30 +143,30 @@ public class GaudioProcessor implements AudioProcessor, SolMusicOneStatisticsEve
         controlParams.metadataLength = metadata.length;
       }
 
-      mInfo.setParams(controlParams);
-      mSetupResult = mSolMusicOne.setup(mConfig, mInfo.getParams());
+      mInfo.params = controlParams;
+      mSetupResult = mSolMusicOne.setup(mConfig, mInfo.params);
       Log.d("[GaudioSolMusicOne] ", "setupCore : " + mSetupResult);
     }
   }
 
   private byte[] getByteArrayFromFilePath(String metadataFilePath) {
-      if (!new File(metadataFilePath).isFile()) {
-          return null;
+    if (!new File(metadataFilePath).isFile()) {
+      return null;
+    }
+    try {
+      FileInputStream fis = new FileInputStream(new File(metadataFilePath));
+      if (fis.available() == 0) {
+        return null;
       }
-      try {
-          FileInputStream fis = new FileInputStream(new File(metadataFilePath));
-          if (fis.available() == 0) {
-              return null;
-          }
-          byte[] metadata = new byte[fis.available()];
-          while (fis.read(metadata) != -1) {
-          }
-          fis.close();
-          return metadata;
-      } catch (IOException e) {
-          e.printStackTrace();
-          return null;
+      byte[] metadata = new byte[fis.available()];
+      while (fis.read(metadata) != -1) {
       }
+      fis.close();
+      return metadata;
+    } catch (IOException e) {
+      e.printStackTrace();
+      return null;
+    }
   }
 
   public void destroyCore() {
@@ -204,7 +204,7 @@ public class GaudioProcessor implements AudioProcessor, SolMusicOneStatisticsEve
 
   @Override
   public int getOutputEncoding() {
-      return C.ENCODING_PCM_16BIT;
+    return C.ENCODING_PCM_16BIT;
   }
 
   @Override
@@ -266,12 +266,13 @@ public class GaudioProcessor implements AudioProcessor, SolMusicOneStatisticsEve
       mInputShortBuffer.get(mInputNativeShortArray, 0, mFrameBufferSize);
       if (mInitCore.get()) {
         if (mIsUpdated.get()) {
-          int result = mSolMusicOne.update(mInfo.getParams());
+          int result = mSolMusicOne.update(mInfo.params);
           mIsUpdated.compareAndSet(true, false);
           Log.d("[GaudioSolMusicOne] ", "update : " + result);
         }
-
         mSolMusicOne.runShort(mInputNativeShortArray, mOutputProcessedShortArray, mConfig.samplesPerBlock);
+
+
         mProcessedShortBuffer.put(mOutputProcessedShortArray);
         mProcessedBuffer.position(mProcessedShortBuffer.position() * mBytesPerSample);
       }
@@ -316,7 +317,7 @@ public class GaudioProcessor implements AudioProcessor, SolMusicOneStatisticsEve
     mConfig.numInputChannels = Format.NO_VALUE;
     mProcessedBuffer = AudioProcessor.EMPTY_BUFFER;
     if (mInitCore.get()) {
-      resetCore();
+        resetCore();
     }
   }
 }
