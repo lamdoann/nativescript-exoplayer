@@ -3,8 +3,6 @@
 import { Video as VideoBase, VideoFill, videoSourceProperty, subtitleSourceProperty } from "./videoplayer-common";
 import * as nsUtils from "tns-core-modules/utils/utils";
 import * as nsApp from "tns-core-modules/application";
-import { GaudioProcessor, ProcessorFactory, PlaybackInformation } from './gaudio-processor/gaudio-processor.android';
-
 
 export * from "./videoplayer-common";
 
@@ -45,8 +43,8 @@ export class Video extends VideoBase {
 	private _boundStop = this.suspendEvent.bind(this);
 	private enableSubtitles: boolean = false;
 
-	private _mInfo: PlaybackInformation; // PlaybackInformation
-	private _gaudioProcessor: GaudioProcessor;
+	private _mInfo: any; // PlaybackInformation
+	private _gaudioProcessor: any; // GaudioProcessor;
 
 	public TYPE = { DETECT: 0, SS: 1, DASH: 2, HLS: 3, OTHER: 4 };
 	public nativeView: any;
@@ -76,8 +74,8 @@ export class Video extends VideoBase {
 		this.lastTimerUpdate = -1;
 		this.interval = null;
 
-		this._mInfo = new PlaybackInformation();
-		this._gaudioProcessor = new GaudioProcessor(this._mInfo);
+		this._mInfo = new (global as any).technology.master.exoplayer.PlayBackInformationJava();
+		this._gaudioProcessor = new (global as any).technology.master.exoplayer.GaudioProcessJava(this._mInfo);
 	}
 
 	get playState(): any {
@@ -406,7 +404,7 @@ export class Video extends VideoBase {
 			let loadControl = new com.google.android.exoplayer2.DefaultLoadControl();
 
 			this.mediaPlayer = com.google.android.exoplayer2.ExoPlayerFactory.newSimpleInstance(
-				new ProcessorFactory(this._context, this._gaudioProcessor),
+				new (global as any).technology.master.exoplayer.ProcessorFactory(this._context, this._gaudioProcessor),
 				// this._context, 
 				trackSelector, 
 				// loadControl
