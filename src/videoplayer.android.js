@@ -4,7 +4,6 @@ exports.Video = void 0;
 var videoplayer_common_1 = require("./videoplayer-common");
 var nsUtils = require("tns-core-modules/utils/utils");
 var nsApp = require("tns-core-modules/application");
-var gaudio_processor_android_1 = require("./gaudio-processor/gaudio-processor.android");
 __exportStar(require("./videoplayer-common"), exports);
 var STATE_IDLE = 1;
 var STATE_BUFFERING = 2;
@@ -38,8 +37,6 @@ var Video = (function (_super) {
         _this.eventPlaybackStart = false;
         _this.lastTimerUpdate = -1;
         _this.interval = null;
-        _this._mInfo = new gaudio_processor_android_1.PlaybackInformation();
-        _this._gaudioProcessor = new gaudio_processor_android_1.GaudioProcessor(_this._mInfo);
         return _this;
     }
     Object.defineProperty(Video.prototype, "playState", {
@@ -324,7 +321,8 @@ var Video = (function (_super) {
             var trackSelection = new com.google.android.exoplayer2.trackselection.AdaptiveTrackSelection.Factory(bm);
             var trackSelector = new com.google.android.exoplayer2.trackselection.DefaultTrackSelector(trackSelection);
             var loadControl = new com.google.android.exoplayer2.DefaultLoadControl();
-            this.mediaPlayer = com.google.android.exoplayer2.ExoPlayerFactory.newSimpleInstance(new gaudio_processor_android_1.ProcessorFactory(this._context, this._gaudioProcessor), trackSelector);
+            this._gaudioProcessor = this.createGaudioProcessor(this._src);
+            this.mediaPlayer = com.google.android.exoplayer2.ExoPlayerFactory.newSimpleInstance(new com.loop.gaudio.ProcessorFactory(this._context, this._gaudioProcessor), trackSelector);
             if (this.textureSurface && !this.textureSurfaceSet) {
                 this.textureSurfaceSet = true;
                 this.mediaPlayer.setVideoSurface(this.textureSurface);
@@ -520,7 +518,9 @@ var Video = (function (_super) {
         this._textureView = null;
         this.mediaPlayer = null;
         this.mediaController = null;
-        this._gaudioProcessor.destroyCore();
+        if (this._gaudioProcessor) {
+            this._gaudioProcessor.destroyCore();
+        }
     };
     Video.prototype.release = function () {
         this.stopCurrentTimer();
@@ -580,6 +580,26 @@ var Video = (function (_super) {
             this.interval = null;
         }
         this.fireCurrentTimeEvent();
+    };
+    Video.prototype.createGaudioProcessor = function (src) {
+        var uri = this.getUri(src);
+        var filePath = uri.getPath();
+        var solPath = filePath.replace(/\.[^/.]+$/, '.sol');
+        var videoFilePath = new java.util.ArrayList();
+        videoFilePath.add(filePath);
+        var solFilePath = new java.util.ArrayList();
+        solFilePath.add(solPath);
+        this._mInfo = new com.loop.gaudio.PlaybackInformation(videoFilePath, solFilePath);
+        return new com.loop.gaudio.GaudioProcessor(this._mInfo);
+    };
+    Video.prototype.getUri = function (src) {
+        if (src instanceof String || typeof src === "string") {
+            return android.net.Uri.parse(src);
+        }
+        if (typeof this._src.typeSource === "number") {
+            return android.net.Uri.parse(src.url);
+        }
+        return src;
     };
     return Video;
 }(videoplayer_common_1.Video));

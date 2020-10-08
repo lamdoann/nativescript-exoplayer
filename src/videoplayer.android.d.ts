@@ -67,4 +67,6 @@ export declare class Video extends VideoBase {
     private startCurrentTimer;
     private fireCurrentTimeEvent;
     private stopCurrentTimer;
+    private createGaudioProcessor;
+    private getUri;
 }

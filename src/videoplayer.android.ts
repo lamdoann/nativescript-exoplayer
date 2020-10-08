@@ -3,7 +3,7 @@
 import { Video as VideoBase, VideoFill, videoSourceProperty, subtitleSourceProperty } from "./videoplayer-common";
 import * as nsUtils from "tns-core-modules/utils/utils";
 import * as nsApp from "tns-core-modules/application";
-import { GaudioProcessor, ProcessorFactory, PlaybackInformation } from './gaudio-processor/gaudio-processor.android';
+// import { GaudioProcessor, ProcessorFactory, PlaybackInformation } from './gaudio-processor/gaudio-processor.android';
 
 
 export * from "./videoplayer-common";
@@ -45,8 +45,8 @@ export class Video extends VideoBase {
 	private _boundStop = this.suspendEvent.bind(this);
 	private enableSubtitles: boolean = false;
 
-	private _mInfo: PlaybackInformation; // PlaybackInformation
-	private _gaudioProcessor: GaudioProcessor;
+	private _mInfo: any; // PlaybackInformation
+	private _gaudioProcessor: any; // GaudioProcessor
 
 	public TYPE = { DETECT: 0, SS: 1, DASH: 2, HLS: 3, OTHER: 4 };
 	public nativeView: any;
@@ -75,9 +75,6 @@ export class Video extends VideoBase {
 		this.eventPlaybackStart = false;
 		this.lastTimerUpdate = -1;
 		this.interval = null;
-
-		this._mInfo = new PlaybackInformation();
-		this._gaudioProcessor = new GaudioProcessor(this._mInfo);
 	}
 
 	get playState(): any {
@@ -405,9 +402,10 @@ export class Video extends VideoBase {
 			let trackSelector = new com.google.android.exoplayer2.trackselection.DefaultTrackSelector(trackSelection);
 			let loadControl = new com.google.android.exoplayer2.DefaultLoadControl();
 
+			this._gaudioProcessor = this.createGaudioProcessor(this._src);
+
 			this.mediaPlayer = com.google.android.exoplayer2.ExoPlayerFactory.newSimpleInstance(
-				new ProcessorFactory(this._context, this._gaudioProcessor),
-				// this._context, 
+				new com.loop.gaudio.ProcessorFactory(this._context, this._gaudioProcessor),
 				trackSelector, 
 				// loadControl
 			);
@@ -658,7 +656,10 @@ export class Video extends VideoBase {
 		this._textureView = null;
 		this.mediaPlayer = null;
 		this.mediaController = null;
-		this._gaudioProcessor.destroyCore();
+
+		if (this._gaudioProcessor) {
+			this._gaudioProcessor.destroyCore();
+		}
 	}
 
 	private release(): void {
@@ -724,6 +725,34 @@ export class Video extends VideoBase {
 			this.interval = null;
 		}
 		this.fireCurrentTimeEvent();
+	}
+
+	private createGaudioProcessor(src: any) {
+		const uri = this.getUri(src);
+		const filePath = uri.getPath();
+		const solPath = filePath.replace(/\.[^/.]+$/, '.sol');
+
+		const videoFilePath =  new java.util.ArrayList();
+		videoFilePath.add(filePath);
+
+		const solFilePath = new java.util.ArrayList();
+		solFilePath.add(solPath);
+
+		this._mInfo = new com.loop.gaudio.PlaybackInformation(videoFilePath, solFilePath);
+		
+		return new com.loop.gaudio.GaudioProcessor(this._mInfo);
+	}
+
+	private getUri(src: any): any {
+		if (src instanceof String || typeof src === "string") {
+			return android.net.Uri.parse(src);
+		} 
+		
+		if (typeof this._src.typeSource === "number") {
+			return android.net.Uri.parse(src.url);
+		}
+
+		return src;
 	}
 }
 
