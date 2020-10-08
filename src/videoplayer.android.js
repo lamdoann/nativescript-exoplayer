@@ -322,7 +322,7 @@ var Video = (function (_super) {
             var trackSelector = new com.google.android.exoplayer2.trackselection.DefaultTrackSelector(trackSelection);
             var loadControl = new com.google.android.exoplayer2.DefaultLoadControl();
             this._gaudioProcessor = this.createGaudioProcessor(this._src);
-            this.mediaPlayer = com.google.android.exoplayer2.ExoPlayerFactory.newSimpleInstance(new com.loop.gaudio.ProcessorFactory(this._context, this._gaudioProcessor), trackSelector);
+            this.mediaPlayer = com.google.android.exoplayer2.ExoPlayerFactory.newSimpleInstance(this._context, new com.loop.gaudio.ProcessorFactory(this._context, this._gaudioProcessor), trackSelector, loadControl);
             if (this.textureSurface && !this.textureSurfaceSet) {
                 this.textureSurfaceSet = true;
                 this.mediaPlayer.setVideoSurface(this.textureSurface);

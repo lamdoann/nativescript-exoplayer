@@ -405,9 +405,10 @@ export class Video extends VideoBase {
 			this._gaudioProcessor = this.createGaudioProcessor(this._src);
 
 			this.mediaPlayer = com.google.android.exoplayer2.ExoPlayerFactory.newSimpleInstance(
+				this._context,
 				new com.loop.gaudio.ProcessorFactory(this._context, this._gaudioProcessor),
 				trackSelector, 
-				// loadControl
+				loadControl
 			);
 
 			if (this.textureSurface && !this.textureSurfaceSet) {
